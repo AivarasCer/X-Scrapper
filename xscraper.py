@@ -1,5 +1,7 @@
 import concurrent
 import requests
+import shelve
+import re
 from twitter_scraper import get_tweets
 from dateutil.parser import parse as parse_date
 from datetime import datetime
@@ -8,40 +10,56 @@ from concurrent.futures import ThreadPoolExecutor
 
 class XScrapper:
 
-    def __init__(self, username, start_date_str, end_date_str, date_format='%Y-%m-%d'):
+    def __init__(self, username, start_date_str, end_date_str, date_format='%Y-%m-%d', cache_file='tweets_cache.db'):
         self.username = username
         self.start_date = datetime.strptime(start_date_str, date_format).date()
         self.end_date = datetime.strptime(end_date_str, date_format).date()
+        self.cache_file = cache_file
 
     def fetch_tweets(self):
+        cache_key = f"{self.username}_{self.start_date}_{self.end_date}"
         tweets = []
-        for tweet in get_tweets(self.username, pages=25):  # Example: Incrementally fetch tweets 25 pages at a time
-            tweet_date = parse_date(tweet['time'])  # Assuming 'time' is the key and it's in a parseable format
-            if self.start_date <= tweet_date.date() <= self.end_date:
-                tweets.append(tweet)
-            elif tweet_date.date() < self.start_date:
-                break  # Stop fetching more tweets as we've passed the start date
+
+        # Use shelve to open the cache file
+        with shelve.open(self.cache_file) as cache:
+            if cache_key in cache:
+                print("Fetching tweets from cache.")
+                return cache[cache_key]  # Return cached tweets if available
+
+            print("Fetching tweets from Twitter.")
+            for tweet in get_tweets(self.username, pages=25):
+                tweet_date = parse_date(tweet['time'])
+                if self.start_date <= tweet_date.date() <= self.end_date:
+                    tweets.append(tweet)
+                elif tweet_date.date() < self.start_date:
+                    break  # Stop fetching as we've passed the start date
+
+            cache[cache_key] = tweets  # Cache the fetched tweets
         return tweets
 
-    def filter_tweets_by_date(self, tweets):
+    def extract_media(self, tweets):
         """
-        Filters tweets to include only those within the specified start and end dates.
+        Extracts media URLs from a list of tweets.
 
         Args:
-            tweets (list of dict): The tweets to filter, each represented as a dictionary with a 'date' key.
+            tweets (list of dict): Tweets to extract media from.
 
         Returns:
-            list of dict: The filtered tweets.
+            dict: A dictionary with tweet IDs as keys and a list of media URLs as values.
         """
-        filtered_tweets = [
-            tweet for tweet in tweets
-            if self.start_date <= tweet['date'] <= self.end_date
-        ]
-        return filtered_tweets
+        media_urls = {}
+        url_pattern = r'https?://[^\s]+'
 
-    def extract_media(self, tweets):
-        # Placeholder for extracting images and links
-        pass
+        for tweet in tweets:
+            tweet_id = tweet['id']
+            text = tweet['text']
+            urls = re.findall(url_pattern, text)
+
+            # Filter or process URLs as needed, e.g., expand short URLs or filter out non-media links
+
+            media_urls[tweet_id] = urls
+
+        return media_urls
 
     def download_media(self, media_urls):
         # Create a ThreadPoolExecutor for parallel downloads
@@ -57,10 +75,11 @@ class XScrapper:
                     print('%r downloaded %r' % (url, len(data)))
 
     def download_file(self, url):
-        # Function to download a file from a URL and return the content
         response = requests.get(url)
-        # Check for successful response here
-        return response.content
+        if response.status_code == 200:
+            return response.content
+        else:
+            raise Exception(f"Failed to download {url}: Status code {response.status_code}")
 
     def save_tweets_as_md(self, tweets):
         for tweet in tweets:
