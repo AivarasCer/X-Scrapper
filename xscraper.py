@@ -63,5 +63,14 @@ class XScrapper:
         return response.content
 
     def save_tweets_as_md(self, tweets):
-        # Placeholder for saving tweets as markdown files
-        pass
+        for tweet in tweets:
+            filename = f"{tweet['id']}.md"
+            with open(filename, 'w') as f:
+                f.write(f"# {tweet['username']}'s Tweet\n\n")
+                f.write(f"{tweet['text']}\n\n")
+                if 'images' in tweet:
+                    for image in tweet['images']:
+                        f.write(f"![Image]({image})\n")
+                if 'links' in tweet:
+                    for link in tweet['links']:
+                        f.write(f"[Link]({link})\n")
