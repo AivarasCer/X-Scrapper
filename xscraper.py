@@ -93,3 +93,32 @@ class XScrapper:
                 if 'links' in tweet:
                     for link in tweet['links']:
                         f.write(f"[Link]({link})\n")
+
+
+def main():
+    username = "twitter_username"  # Replace with the actual Twitter username
+    start_date = "2023-01-01"  # Start date of the tweets
+    end_date = "2023-01-31"  # End date of the tweets
+
+    # Instantiate the XScrapper with the username and date range
+    scraper = XScrapper(username, start_date, end_date)
+
+    # Fetch tweets
+    tweets = scraper.fetch_tweets()
+    print(f"Fetched {len(tweets)} tweets.")
+
+    # Optionally, extract media URLs
+    media_urls = scraper.extract_media(tweets)
+    for tweet_id, urls in media_urls.items():
+        print(f"Tweet ID {tweet_id} has media URLs: {urls}")
+
+    # Download media
+    all_media_urls = [url for urls in media_urls.values() for url in urls]
+    if all_media_urls:
+        scraper.download_media(all_media_urls)
+
+    # Save tweets as markdown
+    scraper.save_tweets_as_md(tweets)
+
+if __name__ == "__main__":
+    main()
