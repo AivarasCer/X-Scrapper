@@ -1,124 +1,60 @@
-import concurrent
-import requests
-import shelve
-import re
-from twitter_scraper import get_tweets
-from dateutil.parser import parse as parse_date
+import tweepy
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
+
+# Twitter API credentials
+API_KEY = 'your_api_key'
+API_SECRET_KEY = 'your_api_secret_key'
+ACCESS_TOKEN = 'your_access_token'
+ACCESS_TOKEN_SECRET = 'your_access_token_secret'
+
+# Authentication with Twitter API
+auth = tweepy.OAuthHandler(API_KEY, API_SECRET_KEY)
+auth.set_access_token(ACCESS_TOKEN, ACCESS_TOKEN_SECRET)
+api = tweepy.API(auth, wait_on_rate_limit=True)
 
 
-class XScrapper:
+def fetch_tweets(username, start_date, end_date):
+    """
+    Fetch tweets for a given username within the specified date range.
+    """
+    all_tweets = []
+    for tweet in tweepy.Cursor(api.user_timeline, screen_name=username, tweet_mode='extended').items():
+        tweet_date = tweet.created_at
+        if start_date <= tweet_date <= end_date:
+            all_tweets.append(tweet)
+        elif tweet_date < start_date:
+            # Since tweets are fetched in reverse chronological order, break the loop if we've passed the start_date
+            break
+    return all_tweets
 
-    def __init__(self, username, start_date_str, end_date_str, date_format='%Y-%m-%d', cache_file='tweets_cache.db'):
-        self.username = username
-        self.start_date = datetime.strptime(start_date_str, date_format).date()
-        self.end_date = datetime.strptime(end_date_str, date_format).date()
-        self.cache_file = cache_file
 
-    def fetch_tweets(self):
-        cache_key = f"{self.username}_{self.start_date}_{self.end_date}"
-        tweets = []
-
-        # Use shelve to open the cache file
-        with shelve.open(self.cache_file) as cache:
-            if cache_key in cache:
-                print("Fetching tweets from cache.")
-                return cache[cache_key]  # Return cached tweets if available
-
-            print("Fetching tweets from Twitter.")
-            for tweet in get_tweets(self.username, pages=25):
-                tweet_date = parse_date(tweet['time'])
-                if self.start_date <= tweet_date.date() <= self.end_date:
-                    tweets.append(tweet)
-                elif tweet_date.date() < self.start_date:
-                    break  # Stop fetching as we've passed the start date
-
-            cache[cache_key] = tweets  # Cache the fetched tweets
-        return tweets
-
-    def extract_media(self, tweets):
-        """
-        Extracts media URLs from a list of tweets.
-
-        Args:
-            tweets (list of dict): Tweets to extract media from.
-
-        Returns:
-            dict: A dictionary with tweet IDs as keys and a list of media URLs as values.
-        """
-        media_urls = {}
-        url_pattern = r'https?://[^\s]+'
-
+def save_tweets_to_md(tweets, filename):
+    """
+    Save tweets to a Markdown file.
+    """
+    with open(filename, 'w', encoding='utf-8') as file:
         for tweet in tweets:
-            tweet_id = tweet['id']
-            text = tweet['text']
-            urls = re.findall(url_pattern, text)
+            # Write tweet text
+            file.write(f"{tweet.full_text}\n\n")
+            # Write images if any
+            if 'media' in tweet.entities:
+                for media in tweet.entities['media']:
+                    file.write(f"![image]({media['media_url_https']})\n\n")
+            # Write URLs if any
+            if 'urls' in tweet.entities:
+                for url in tweet.entities['urls']:
+                    file.write(f"[Link]({url['expanded_url']})\n\n")
 
-            # Filter or process URLs as needed, e.g., expand short URLs or filter out non-media links
-
-            media_urls[tweet_id] = urls
-
-        return media_urls
-
-    def download_media(self, media_urls):
-        # Create a ThreadPoolExecutor for parallel downloads
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            future_to_url = {executor.submit(self.download_file, url): url for url in media_urls}
-            for future in concurrent.futures.as_completed(future_to_url):
-                url = future_to_url[future]
-                try:
-                    data = future.result()
-                except Exception as exc:
-                    print('%r generated an exception: %s' % (url, exc))
-                else:
-                    print('%r downloaded %r' % (url, len(data)))
-
-    def download_file(self, url):
-        response = requests.get(url)
-        if response.status_code == 200:
-            return response.content
-        else:
-            raise Exception(f"Failed to download {url}: Status code {response.status_code}")
-
-    def save_tweets_as_md(self, tweets):
-        for tweet in tweets:
-            filename = f"{tweet['id']}.md"
-            with open(filename, 'w') as f:
-                f.write(f"# {tweet['username']}'s Tweet\n\n")
-                f.write(f"{tweet['text']}\n\n")
-                if 'images' in tweet:
-                    for image in tweet['images']:
-                        f.write(f"![Image]({image})\n")
-                if 'links' in tweet:
-                    for link in tweet['links']:
-                        f.write(f"[Link]({link})\n")
-
-
-def main():
-    username = "twitter_username"  # Replace with the actual Twitter username
-    start_date = "2023-01-01"  # Start date of the tweets
-    end_date = "2023-01-31"  # End date of the tweets
-
-    # Instantiate the XScrapper with the username and date range
-    scraper = XScrapper(username, start_date, end_date)
-
-    # Fetch tweets
-    tweets = scraper.fetch_tweets()
-    print(f"Fetched {len(tweets)} tweets.")
-
-    # Optionally, extract media URLs
-    media_urls = scraper.extract_media(tweets)
-    for tweet_id, urls in media_urls.items():
-        print(f"Tweet ID {tweet_id} has media URLs: {urls}")
-
-    # Download media
-    all_media_urls = [url for urls in media_urls.values() for url in urls]
-    if all_media_urls:
-        scraper.download_media(all_media_urls)
-
-    # Save tweets as markdown
-    scraper.save_tweets_as_md(tweets)
 
 if __name__ == "__main__":
-    main()
+    username = input("Enter the Twitter username: ")
+    start_date_str = input("Enter the start date (YYYY-MM-DD): ")
+    end_date_str = input("Enter the end date (YYYY-MM-DD): ")
+
+    start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+    end_date = datetime.strptime(end_date_str, "%Y-%m-%d")
+
+    tweets = fetch_tweets(username, start_date, end_date)
+    save_tweets_to_md(tweets, f"{username}_tweets_{start_date_str}_to_{end_date_str}.md")
+
+    print(f"Saved tweets to {username}_tweets_{start_date_str}_to_{end_date_str}.md")
